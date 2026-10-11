@@ -1,1 +1,0 @@
-# mine-collapse-early-warning
