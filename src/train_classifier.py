@@ -1,11 +1,10 @@
-"""Train 3-class classifier."""
+"""Train 3-class classifier using scikit-learn."""
 import numpy as np
-import tensorflow as tf
-from tensorflow import keras
-from tensorflow.keras import layers, callbacks
+from sklearn.neural_network import MLPClassifier
 from sklearn.metrics import classification_report, confusion_matrix
 import matplotlib.pyplot as plt
 import seaborn as sns
+import joblib
 from pathlib import Path
 import yaml
 
@@ -16,20 +15,20 @@ class ClassifierTrainer:
             self.config = yaml.safe_load(f)
         self.model_cfg = self.config['model']['classifier']
     
-    def build_model(self, input_dim: int, n_classes: int = 3) -> keras.Model:
-        layers_list = [layers.Input(shape=(input_dim,))]
-        for i, units in enumerate(self.model_cfg['hidden_layers']):
-            layers_list.append(layers.Dense(units, activation='relu'))
-            layers_list.append(layers.BatchNormalization())
-            if i < len(self.model_cfg['hidden_layers']) - 1:
-                layers_list.append(layers.Dropout(self.model_cfg['dropout']))
-        layers_list.append(layers.Dense(n_classes, activation='softmax'))
-        model = keras.Sequential(layers_list)
-        model.compile(
-            optimizer=keras.optimizers.Adam(learning_rate=self.model_cfg['learning_rate']),
-            loss='sparse_categorical_crossentropy',
-            metrics=['accuracy'])
-        return model
+    def build_model(self):
+        return MLPClassifier(
+            hidden_layer_sizes=tuple(self.model_cfg['hidden_layers']),
+            activation='relu',
+            solver='adam',
+            learning_rate_init=self.model_cfg['learning_rate'],
+            batch_size=self.model_cfg['batch_size'],
+            max_iter=self.model_cfg['epochs'] * 10,
+            early_stopping=True,
+            n_iter_no_change=self.model_cfg['early_stopping_patience'],
+            validation_fraction=0.1,
+            random_state=42,
+            verbose=True
+        )
     
     def train(self):
         print("Loading preprocessed data...")
@@ -39,36 +38,44 @@ class ClassifierTrainer:
         y_train = np.load('data/processed/y_train.npy')
         y_val = np.load('data/processed/y_val.npy')
         y_test = np.load('data/processed/y_test.npy')
-        model = self.build_model(X_train.shape[1])
-        model.summary()
-        cbs = [
-            callbacks.EarlyStopping(monitor='val_loss',
-                patience=self.model_cfg['early_stopping_patience'],
-                restore_best_weights=True),
-            callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.5,
-                patience=3, min_lr=1e-6),
-            callbacks.ModelCheckpoint(self.config['paths']['classifier_model'],
-                monitor='val_accuracy', save_best_only=True)
-        ]
-        history = model.fit(X_train, y_train, validation_data=(X_val, y_val),
-            epochs=self.model_cfg['epochs'], batch_size=self.model_cfg['batch_size'],
-            callbacks=cbs, verbose=1)
+
+        print(f"Train label distribution:")
+        unique, counts = np.unique(y_train, return_counts=True)
+        for u, c in zip(unique, counts):
+            print(f"  {u}: {c}")
+
+        X_train_full = np.vstack([X_train, X_val])
+        y_train_full = np.concatenate([y_train, y_val])
+
+        model = self.build_model()
+        print("\nTraining MLPClassifier...")
+        model.fit(X_train_full, y_train_full)
+
         print("\n=== Test Set Evaluation ===")
-        y_pred = model.predict(X_test, verbose=0)
-        y_pred_cls = np.argmax(y_pred, axis=1)
-        print(classification_report(y_test, y_pred_cls,
-            target_names=['Normal', 'Warning', 'Critical']))
-        cm = confusion_matrix(y_test, y_pred_cls)
+        y_pred = model.predict(X_test)
+        print(classification_report(
+            y_test, y_pred,
+            labels=[0, 1, 2],
+            target_names=['Normal', 'Warning', 'Critical'],
+            zero_division=0
+        ))
+
+        cm = confusion_matrix(y_test, y_pred, labels=[0, 1, 2])
         plt.figure(figsize=(7, 6))
         sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
                     xticklabels=['Normal', 'Warning', 'Critical'],
                     yticklabels=['Normal', 'Warning', 'Critical'])
         plt.title('Classifier Confusion Matrix')
+        plt.ylabel('True')
+        plt.xlabel('Predicted')
         plt.tight_layout()
+        Path("models").mkdir(exist_ok=True)
         plt.savefig('models/confusion_matrix.png', dpi=100)
         plt.close()
-        return model
 
+        joblib.dump(model, self.config['paths']['classifier_model'].replace('.keras', '.pkl'))
+        print("Model saved.")
+        return model
 
 if __name__ == "__main__":
     Path("models").mkdir(exist_ok=True)
