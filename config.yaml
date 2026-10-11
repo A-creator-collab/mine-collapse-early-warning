@@ -1,0 +1,63 @@
+project:
+  name: "Mine Collapse Early-Warning System"
+  version: "1.0.0"
+  random_seed: 42
+
+data:
+  n_samples: 20000
+  sampling_rate_hz: 20
+  train_split: 0.8
+  val_split: 0.1
+  test_split: 0.1
+  rolling_window: 10
+  raw_dir: "data/raw"
+  processed_dir: "data/processed"
+
+features:
+  raw:
+    - accel_x
+    - accel_y
+    - accel_z
+    - gyro_x
+    - gyro_y
+    - gyro_z
+    - vibration_magnitude
+    - load_cell
+    - displacement
+    - water_level
+  engineered:
+    - vib_rolling_mean
+    - vib_rolling_std
+    - load_rolling_mean
+    - load_rolling_std
+    - disp_rolling_mean
+    - disp_rolling_std
+    - vib_change_rate
+    - load_change_rate
+    - disp_change_rate
+
+model:
+  classifier:
+    hidden_layers: [256, 128, 64, 32]
+    dropout: 0.3
+    learning_rate: 0.001
+    batch_size: 256
+    epochs: 30
+    early_stopping_patience: 8
+  anomaly:
+    encoding_dims: [64, 32, 16]
+    learning_rate: 0.001
+    batch_size: 256
+    epochs: 30
+    contamination: 0.05
+
+paths:
+  classifier_model: "models/classifier.keras"
+  anomaly_model: "models/anomaly_detector.keras"
+  scaler: "models/scaler.pkl"
+  feature_cols: "models/feature_cols.pkl"
+  anomaly_threshold: "models/anomaly_threshold.pkl"
+
+streaming:
+  update_interval_sec: 0.5
+  buffer_size: 500
